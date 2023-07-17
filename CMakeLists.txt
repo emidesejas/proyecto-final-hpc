@@ -9,6 +9,7 @@ project(trabajo-final-hpc CXX)
 find_package(MPI REQUIRED)
 
 find_package(Drogon REQUIRED)
+find_package(fmt REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -22,4 +23,5 @@ target_link_libraries(rest_server
 
 target_link_libraries(lambda_handler
   PRIVATE
-    MPI::MPI_CXX)
+    MPI::MPI_CXX
+    fmt::fmt)

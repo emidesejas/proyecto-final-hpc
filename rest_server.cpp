@@ -22,68 +22,39 @@ int main()
   MPI_Get_processor_name(processor_name, &name_len);
 
   // Print off a hello world message
-  printf("Hello world from processor %s, rank %d out of %d processors\n",
+  printf("%s: Rest Server with rank %d out of %d processors\n",
           processor_name, world_rank, world_size);
 
   // `registerHandler()` adds a handler to the desired path. The handler is
   // responsible for generating a HTTP response upon an HTTP request being
   // sent to Drogon
   app().registerHandler(
-    "/",
-    [](const HttpRequestPtr &,
-        std::function<void(const HttpResponsePtr &)> &&callback)
-    {
-      auto resp = HttpResponse::newHttpResponse();
-      resp->setBody("Hello, World!");
-      callback(resp);
-    },
-    {Get});
-
-  // `registerHandler()` also supports parsing and passing the path as
-  // parameters to the handler. Parameters are specified using {}. The text
-  // inside the {} does not correspond to the index of parameter passed to the
-  // handler (nor it has any meaning). Instead, it is only to make it easier
-  // for users to recognize the function of each parameter.
-  app().registerHandler(
-    "/user/{user-name}",
+    "/lambda/{lambda-id}",
     [](const HttpRequestPtr &,
         std::function<void(const HttpResponsePtr &)> &&callback,
-        const std::string &name)
+        const std::string &lambdaId)
     {
       auto resp = HttpResponse::newHttpResponse();
-      resp->setBody("Hello, " + name + "!");
-      callback(resp);
-    },
-    {Get});
+      if (lambdaId.empty())
+      {
+        LOG_INFO << "Invalid request: missing lambda id " << lambdaId;
+        Json::Value json;
+        json["error"]="Missing lambda id";
+        auto resp = HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(k400BadRequest);
+        callback(resp);
+      } else {
+        LOG_INFO << "lambda id: " << lambdaId;
+        Json::Value json;
+        json["lambda"] = lambdaId;
 
-  // You can also specify that the parameter is in the query section of the
-  // URL!
-  app().registerHandler(
-    "/hello?user={user-name}",
-    [](const HttpRequestPtr &,
-        std::function<void(const HttpResponsePtr &)> &&callback,
-        const std::string &name)
-    {
-      auto resp = HttpResponse::newHttpResponse();
-      resp->setBody("Hello, " + name + "!");
-      callback(resp);
-    },
-    {Get});
+        int number = 1;
+        MPI_Send(lambdaId.c_str(), lambdaId.size(), MPI_CHAR, 1, 0, MPI_COMM_WORLD);
 
-  // Or, if you want to, instead of asking drogon to parse it for you. You can
-  // parse the request yourselves.
-  app().registerHandler(
-    "/hello_user",
-    [](const HttpRequestPtr &req,
-        std::function<void(const HttpResponsePtr &)> &&callback)
-    {
-      auto resp = HttpResponse::newHttpResponse();
-      auto name = req->getOptionalParameter<std::string>("user");
-      if (!name)
-        resp->setBody("Please tell me your name");
-      else
-        resp->setBody("Hello, " + name.value() + "!");
-      callback(resp);
+        auto resp = HttpResponse::newHttpJsonResponse(json);
+        resp->setStatusCode(k200OK);
+        callback(resp);
+      }
     },
     {Get});
 
@@ -91,7 +62,7 @@ int main()
   // on multiple IP addresses by adding multiple listeners. For example, if
   // you want the server also listen on 127.0.0.1 port 5555. Just add another
   // line of addListener("127.0.0.1", 5555)
-  LOG_INFO << "Server running on 127.0.0.1:8848";
+  LOG_INFO << "Server running on http://127.0.0.1:8848";
   app().addListener("127.0.0.1", 8848);
   app().setIntSignalHandler(
     []()
