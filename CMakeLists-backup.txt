@@ -1,0 +1,49 @@
+cmake_minimum_required(VERSION 3.15)
+
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+  CACHE STRING "Vcpkg toolchain file")
+
+project(trabajo-final-hpc CXX)
+
+include(ExternalProject)
+include(ProcessorCount)
+
+# Get the number of processors
+ProcessorCount(processors)
+
+ExternalProject_Add(ExternalMakeProject
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external_dependencies/node
+  PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/external_dependencies/node
+  BINARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external_dependencies/node/out
+  CONFIGURE_COMMAND "./configure --shared"
+  BUILD_COMMAND ${CMAKE_MAKE_PROGRAM} j=${processors}
+  INSTALL_COMMAND "make"
+)
+
+add_library(MyMakefileTarget INTERFACE)
+add_dependencies(MyMakefileTarget ExternalMakeProject)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external_dependencies/node/src)
+
+# source: https://cliutils.gitlab.io/modern-cmake/chapters/packages/MPI.html
+find_package(MPI REQUIRED)
+
+find_package(Drogon REQUIRED)
+find_package(fmt REQUIRED)
+
+set(CMAKE_CXX_STANDARD 17)
+
+add_executable(rest_server rest_server.cpp)
+add_executable(lambda_handler lambda_handler.cpp)
+
+target_link_libraries(rest_server
+  PRIVATE
+    Drogon::Drogon
+    MPI::MPI_CXX)
+
+target_link_libraries(lambda_handler
+  PRIVATE
+    MPI::MPI_CXX
+    fmt::fmt)
+
+target_link_libraries(lambda_handler INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/../external_dependencies/node/out)
