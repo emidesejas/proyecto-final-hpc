@@ -4,6 +4,13 @@
 #include <mpi.h>
 #include <fmt/format.h>
 
+#include <iostream>
+#include <unistd.h>
+#include <sys/wait.h>
+
+#define READ_END 0
+#define WRITE_END 1
+
 int main()
 {
   // Initialize the MPI environment
@@ -48,13 +55,70 @@ int main()
       break;
     }
 
-    fmt::println("Executing lambdas/{}.js", request_string);
-    auto output = request_string + "_" + std::to_string(std::time(nullptr));
+    // Pipes for IPC
+    int fd1[2], fd2[2];
 
-    std::string command = fmt::format("node lambdas/{}.js >> invocations/{}.log", request_string, output);
-    system(command.c_str());
+    // Create the pipes
+    if (pipe(fd1) == -1 || pipe(fd2) == -1) {
+        std::cerr << "Pipe failed" << std::endl;
+        return 1;
+    }
 
-    fmt::println("Result can be found in {}", output);
+    // Fork a child process
+    pid_t pid = fork();
+
+    if (pid > 0) { // parent process
+        // Close the unused ends of the pipes
+        close(fd1[READ_END]);
+        close(fd2[WRITE_END]);
+
+        // Write to the pipe
+        std::string data = "Hello, Node.js!\n";
+        write(fd1[WRITE_END], data.c_str(), data.size());
+
+        // Close the write end of the first pipe
+        close(fd1[WRITE_END]);
+
+        // Read from the second pipe
+        char buffer[128];
+        read(fd2[READ_END], buffer, sizeof(buffer));
+
+        // Print the result
+        std::cout << "Received from Node.js: " << buffer << std::endl;
+
+        // Close the read end of the second pipe
+        close(fd2[READ_END]);
+
+        // Wait for the child to exit
+        wait(NULL);
+    } else { // child process
+        // Close the unused ends of the pipes
+        close(fd1[WRITE_END]);
+        close(fd2[READ_END]);
+
+        // Redirect stdin to the read end of the first pipe
+        dup2(fd1[READ_END], STDIN_FILENO);
+
+        // Redirect stdout to the write end of the second pipe
+        dup2(fd2[WRITE_END], STDOUT_FILENO);
+
+        // Exec the Node.js script
+        execlp("node", "node", "child.js", NULL);
+
+        // If exec returns, it must have failed
+        std::cerr << "Exec failed" << std::endl;
+        return 1;
+    }
+
+    // fmt::println("Executing lambdas/{}.js", request_string);
+    // auto output = request_string + "_" + std::to_string(std::time(nullptr));
+
+    // std::string command = fmt::format("node lambdas/{}.js >> invocations/{}.log", request_string, output);
+    // system(command.c_str());
+
+    // fmt::println("Result can be found in {}", output);
+
+    fmt::println("Execution finished");
   }
 
   MPI_Finalize();
