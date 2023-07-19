@@ -5,7 +5,9 @@
 #include <fmt/format.h>
 
 #include <iostream>
+#include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 
 #define READ_END 0
@@ -55,68 +57,67 @@ int main()
       break;
     }
 
-    // Pipes for IPC
-    int fd1[2], fd2[2];
-
-    // Create the pipes
-    if (pipe(fd1) == -1 || pipe(fd2) == -1) {
-        std::cerr << "Pipe failed" << std::endl;
-        return 1;
-    }
-
     // Fork a child process
     pid_t pid = fork();
 
+    auto fifoSuffix = fmt::format("{}_{}", world_rank, request_string);
+    auto toNodeFifo = fmt::format("toNode_{}", fifoSuffix);
+    auto fromNodeFifo = fmt::format("fromNode_{}", fifoSuffix);
+
     if (pid > 0) { // parent process
-        // Close the unused ends of the pipes
-        close(fd1[READ_END]);
-        close(fd2[WRITE_END]);
+      // Create the named pipes
+      mkfifo(toNodeFifo.c_str(), 0666);
+      mkfifo(fromNodeFifo.c_str(), 0666);
 
-        // Write to the pipe
-        std::string data = "Hello, Node.js!\n";
-        write(fd1[WRITE_END], data.c_str(), data.size());
-
-        // Close the write end of the first pipe
-        close(fd1[WRITE_END]);
-
-        // Read from the second pipe
-        char buffer[128];
-        read(fd2[READ_END], buffer, sizeof(buffer));
-
-        // Print the result
-        std::cout << "Received from Node.js: " << buffer << std::endl;
-
-        // Close the read end of the second pipe
-        close(fd2[READ_END]);
-
-        // Wait for the child to exit
-        wait(NULL);
-    } else { // child process
-        // Close the unused ends of the pipes
-        close(fd1[WRITE_END]);
-        close(fd2[READ_END]);
-
-        // Redirect stdin to the read end of the first pipe
-        dup2(fd1[READ_END], STDIN_FILENO);
-
-        // Redirect stdout to the write end of the second pipe
-        dup2(fd2[WRITE_END], STDOUT_FILENO);
-
-        // Exec the Node.js script
-        execlp("node", "node", "child.js", NULL);
-
-        // If exec returns, it must have failed
-        std::cerr << "Exec failed" << std::endl;
+      // Open the toNodeFifo for writing
+      int fd_out = open(toNodeFifo.c_str(), O_WRONLY);
+      if (fd_out == -1) {
+        std::cerr << "Failed to open toNodeFifo for writing" << std::endl;
         return 1;
+      }
+
+      // Write to node
+      //std::string data = "Hello, Node.js!";
+      write(fd_out, request_string.c_str(), request_string.size());
+
+      // Close the write end of the pipe
+      close(fd_out);
+
+      // Open the fromNodeFifo for reading
+      int fd_in = open(fromNodeFifo.c_str(), O_RDONLY);
+      if (fd_in == -1) {
+        std::cerr << "Failed to open fromNodeFifo for reading" << std::endl;
+        return 1;
+      }
+
+      // Read from the IN_FIFO
+      char buffer[128];
+      int numBytes = read(fd_in, buffer, sizeof(buffer));
+      buffer[numBytes] = '\0'; // Null-terminate the string
+
+      // Print the result
+      std::cout << "Received from Node.js: " << buffer << std::endl;
+      
+      // Close the read end of the pipe
+      close(fd_in);
+
+      wait(NULL);
+
+      if (unlink(toNodeFifo.c_str()) == -1) {
+        perror("Error removing the toNodeFifo");
+      }
+
+      if (unlink(fromNodeFifo.c_str()) == -1) {
+        perror("Error removing the fromNodeFifo");
+      }
+    } else { // child process
+      // Exec the Node.js script
+      execlp("node", "node", "child.js", toNodeFifo.c_str(), fromNodeFifo.c_str(), NULL);
+
+      // If exec returns, it must have failed
+      std::cerr << "Exec failed" << std::endl;
+      return 1;
     }
-
-    // fmt::println("Executing lambdas/{}.js", request_string);
-    // auto output = request_string + "_" + std::to_string(std::time(nullptr));
-
-    // std::string command = fmt::format("node lambdas/{}.js >> invocations/{}.log", request_string, output);
-    // system(command.c_str());
-
-    // fmt::println("Result can be found in {}", output);
 
     fmt::println("Execution finished");
   }

@@ -1,1 +1,1 @@
-console.log("Test 1");
+module.exports.handler = (data) => ({ data });
