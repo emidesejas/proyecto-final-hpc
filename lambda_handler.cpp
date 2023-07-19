@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <cstdint>
 #include <ctime>
 
 #include <mpi.h>
@@ -13,7 +14,7 @@
 #define READ_END 0
 #define WRITE_END 1
 
-void sendDataToMaster(char *data, int numBytes);
+void sendDataToMaster(const char *data, int numBytes);
 
 int main()
 {
@@ -93,14 +94,34 @@ int main()
         return 1;
       }
 
-      // Read from the IN_FIFO
-      char buffer[128];
-      int numBytes = read(fd_in, buffer, sizeof(buffer));
-      buffer[numBytes] = '\0'; // Null-terminate the string
 
-      // Print the result
-      std::cout << "Received from Node.js: " << buffer << std::endl;
-      
+      int64_t dataSize;
+      int bytesRead = read(fd_in, &dataSize, sizeof(dataSize)); // Read the binary representation of the size
+
+      if (bytesRead <= 0) {
+        std::cerr << "Failed to read size of fromNode pipe" << std::endl;
+        close(fd_in);
+        return 1;
+      }
+
+
+      std::string data;
+      data.reserve(dataSize);
+
+      const int64_t bufferSize = 128;
+      char buffer[bufferSize];
+      while (dataSize > 0) {
+          int bytesToRead = std::min(bufferSize, dataSize);
+          int bytesRead = read(fd_in, buffer, bytesToRead);
+          if (bytesRead <= 0) {
+              std::cerr << "Failed to read data from named pipe" << std::endl;
+              close(fd_in);
+              return 1;
+          }
+          data.append(buffer, bytesRead);
+          dataSize -= bytesRead;
+      }
+
       // Close the read end of the pipe
       close(fd_in);
 
@@ -114,7 +135,7 @@ int main()
         perror("Error removing the fromNodeFifo");
       }
 
-      sendDataToMaster(buffer, numBytes);
+      sendDataToMaster(data.c_str(), data.size());
     } else { // child process
       // Exec the Node.js script
       execlp("node", "node", "child.js", toNodeFifo.c_str(), fromNodeFifo.c_str(), NULL);
@@ -130,6 +151,6 @@ int main()
   MPI_Finalize();
 }
 
-void sendDataToMaster(char *data, int numBytes) {
+void sendDataToMaster(const char *data, int numBytes) {
   MPI_Send(data, numBytes, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
 }

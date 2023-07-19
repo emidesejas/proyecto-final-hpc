@@ -45,9 +45,7 @@ int main()
         callback(resp);
       } else {
         Json::Value json;
-        json["lambda"] = lambdaId;
-
-        int number = 1;
+        json["status"] = "OK";
 
         LOG_INFO << "MPI Send to start lambda with id: " << lambdaId;
         MPI_Send(lambdaId.c_str(), lambdaId.size(), MPI_CHAR, 1, 0, MPI_COMM_WORLD);
@@ -61,8 +59,17 @@ int main()
         char response[number_amount];
         MPI_Recv(&response, number_amount, MPI_CHAR, 1, 0, MPI_COMM_WORLD, &status);
 
-        std::string response_string(response, number_amount);
-        json["response"] = response_string;
+        Json::Value jsonData;
+        Json::CharReaderBuilder jsonBuilder;
+        std::string errs;
+        std::istringstream stream(response);
+
+        if (!Json::parseFromStream(jsonBuilder, stream, &jsonData, &errs)) {
+          std::cerr << "Failed to parse JSON: " << errs << std::endl;
+          json["status"] = "ERROR";
+        }
+
+        json["response"] = jsonData;
 
         auto resp = HttpResponse::newHttpJsonResponse(json);
         resp->setStatusCode(k200OK);

@@ -15,10 +15,17 @@ const returnToParent = (result) => {
     writeStream.on('error', (err) => {
       console.error(err);
     });
-    
-    writeStream.write(JSON.stringify(result), () => {
+
+    const dataString = result instanceof Object ? JSON.stringify(result) : result.toString();
+    const dataSize = Buffer.alloc(8); 
+    dataSize.writeBigInt64LE(BigInt(dataString.length));
+
+    // Has size and data in the same buffer
+    const combinedBuffer = Buffer.concat([dataSize, Buffer.from(dataString)]);
+
+    writeStream.write(combinedBuffer, () => {
       writeStream.end();
-    });
+  });
   });
 }
 
