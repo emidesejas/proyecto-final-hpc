@@ -13,6 +13,8 @@
 #define READ_END 0
 #define WRITE_END 1
 
+void sendDataToMaster(char *data, int numBytes);
+
 int main()
 {
   // Initialize the MPI environment
@@ -52,6 +54,7 @@ int main()
     // Convert the char array to std::string
     std::string request_string(request, number_amount);
 
+    // TODO: add logic to terminate the process from the main process
     if (request_string == "0")
     {
       break;
@@ -110,6 +113,8 @@ int main()
       if (unlink(fromNodeFifo.c_str()) == -1) {
         perror("Error removing the fromNodeFifo");
       }
+
+      sendDataToMaster(buffer, numBytes);
     } else { // child process
       // Exec the Node.js script
       execlp("node", "node", "child.js", toNodeFifo.c_str(), fromNodeFifo.c_str(), NULL);
@@ -123,4 +128,8 @@ int main()
   }
 
   MPI_Finalize();
+}
+
+void sendDataToMaster(char *data, int numBytes) {
+  MPI_Send(data, numBytes, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
 }
