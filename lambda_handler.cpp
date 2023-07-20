@@ -145,7 +145,7 @@ int main()
       return 1;
     }
 
-    fmt::println("Execution finished");
+    fmt::println("Lambda execution finished on handler");
   }
 
   MPI_Finalize();
