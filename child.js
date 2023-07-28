@@ -16,6 +16,10 @@ const returnToParent = (result) => {
       console.error(err);
     });
 
+    if (result === undefined || result === null) {
+      result = 'null';
+    }
+
     const dataString = result instanceof Object ? JSON.stringify(result) : result.toString();
     const dataSize = Buffer.alloc(8); 
     dataSize.writeBigInt64LE(BigInt(dataString.length));
