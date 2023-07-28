@@ -1,5 +1,6 @@
 {
   "dependencies": [
+    "cxxopts",
     "drogon",
     "fmt"
   ]

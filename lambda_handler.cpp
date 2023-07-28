@@ -4,6 +4,7 @@
 
 #include <mpi.h>
 #include <fmt/format.h>
+#include <cxxopts.hpp>
 
 #include <iostream>
 #include <fcntl.h>
@@ -16,8 +17,17 @@
 
 void sendDataToMaster(const char *data, int numBytes);
 
-int main()
+int main(int argc, char** argv)
 {
+  cxxopts::Options options("Lambda Handler", "Executes lambda functions");
+
+  options.add_options()
+    ("l,lambdas", "How many lambdas can this node handle", cxxopts::value<int>()->default_value("1"));
+
+  auto params = options.parse(argc, argv);
+
+  auto lambdas = params["lambdas"].as<int>();
+
   // Initialize the MPI environment
   MPI_Init(NULL, NULL);
 
@@ -34,15 +44,15 @@ int main()
   int name_len;
   MPI_Get_processor_name(processor_name, &name_len);
 
-  // Print off a hello world message
-  printf("%s: Lambda handler with rank %d out of %d processors\n",
-          processor_name, world_rank, world_size);
+  MPI_Gather(&lambdas, 1, MPI_INT, NULL, 0, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD);
+
+  fmt::println("{}: Lambda handler with rank {} out of {} processors. Handling {} lambdas.", processor_name, world_rank, world_size, lambdas);
 
   MPI_Status status;
 
   while (true)
   {
-    MPI_Probe(0, 0, MPI_COMM_WORLD, &status);
+    MPI_Probe(0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
     int number_amount;
 
@@ -50,7 +60,7 @@ int main()
 
     char request[number_amount];
 
-    MPI_Recv(&request, number_amount, MPI_CHAR, 0, 0, MPI_COMM_WORLD, &status);
+    MPI_Recv(&request, number_amount, MPI_CHAR, 0, status.MPI_TAG, MPI_COMM_WORLD, &status);
 
     // Convert the char array to std::string
     std::string request_string(request, number_amount);
@@ -135,7 +145,7 @@ int main()
         perror("Error removing the fromNodeFifo");
       }
 
-      sendDataToMaster(data.c_str(), data.size());
+      MPI_Send(data.c_str(), data.size(), MPI_CHAR, 0, status.MPI_TAG, MPI_COMM_WORLD);
     } else { // child process
       // Exec the Node.js script
       execlp("node", "node", "child.js", toNodeFifo.c_str(), fromNodeFifo.c_str(), NULL);
@@ -145,7 +155,7 @@ int main()
       return 1;
     }
 
-    fmt::println("Lambda execution finished on handler");
+    // fmt::println("Lambda execution finished on handler");
   }
 
   MPI_Finalize();
