@@ -28,7 +28,6 @@ void mpiHandler(int worldSize, std::vector<HandlerState> handlerStates, int &req
     std::istringstream stream(response);
 
     value.loop->queueInLoop([value, status, &stream, number_amount]() mutable {
-
       value.callback(status, stream);
     });    
   }

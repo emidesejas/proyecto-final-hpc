@@ -17,8 +17,8 @@ void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &req
     {
       // GET REQUEST NUMBER. USE SOME VARIABLE TO ACCOUNT THE REQUEST NUMBER AND USE IT AS TAG
       auto resp = HttpResponse::newHttpResponse();
-      int tag;
-      if (!convertToInt(lambdaId, &tag) && lambdaId.empty())
+      int lambdaIdInt;
+      if (!convertToInt(lambdaId, &lambdaIdInt) && lambdaId.empty())
       {
         LOG_INFO << "Invalid request: missing lambda id " << lambdaId;
         Json::Value json;
@@ -27,12 +27,14 @@ void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &req
         resp->setStatusCode(k400BadRequest);
         callback(resp);
       } else {
-        LOG_INFO << "TAG: " << tag;
-        
+        int localRequestNumber;
 
         requestCounterMutex.lock();
         requestCounter++;
+        localRequestNumber = int(requestCounter);
         requestCounterMutex.unlock();
+
+        LOG_INFO << "LambdaID: " << lambdaIdInt << " with request number: " << localRequestNumber;
 
         stateMutex.lock();
         auto availableHandler = getAvailableHandler(handlerStates);
@@ -41,6 +43,8 @@ void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &req
 
         if (availableHandler == 0) {
           LOG_WARN << "No available handler";
+
+          // Should put request in queue
           return;
         }
 
@@ -53,8 +57,6 @@ void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &req
           Json::Value jsonData;
           Json::CharReaderBuilder jsonBuilder;
           std::string errs;
-
-          LOG_INFO << "Response: " << response.str();
 
           if (!Json::parseFromStream(jsonBuilder, response, &jsonData, &errs)) {
             std::cerr << "Failed to parse JSON: " << errs << std::endl;
@@ -75,11 +77,11 @@ void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &req
           stateMutex.unlock();
         };
 
-        pendingRequests[requestCounter] = { tag, responseHandler, app().getIOLoop(app().getCurrentThreadIndex()) };
+        pendingRequests[requestCounter] = { localRequestNumber, responseHandler, app().getIOLoop(app().getCurrentThreadIndex()) };
 
         LOG_INFO << "Chosen node: " << availableHandler;
         LOG_INFO << "MPI Send to start lambda with id: " << lambdaId;
-        MPI_Send(lambdaId.c_str(), lambdaId.size(), MPI_CHAR, availableHandler, tag, MPI_COMM_WORLD);
+        MPI_Send(lambdaId.c_str(), lambdaId.size(), MPI_CHAR, availableHandler, localRequestNumber, MPI_COMM_WORLD);
       }
     },
     {Get});
