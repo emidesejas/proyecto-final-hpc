@@ -2,40 +2,20 @@
 #include <mpi.h>
 #include <omp.h>
 
+#include "utils/globalStructures.hpp"
+#include "utils/misc.hpp"
+#include "utils/mpiUtils.hpp"
+
 using namespace drogon;
 
-std::mutex stateMutex;
-
-std::mutex requestCounterMutex;
-
-struct HandlerState
-{
-  int lambdas;
-  int lambdasRunning;
-};
-
-struct PendingRequest
-{
-  int tag;
-  std::function<void (MPI_Status, std::istringstream&)> callback;
-  trantor::EventLoop *loop;
-};
-
-int getAvailableHandler(std::vector<HandlerState> handlerStates);
-bool convertToInt(const std::string& str, int *result);
-
 void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests);
-void mpiHandler(int worldSize, std::vector<HandlerState> handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests);
 
-int main()
-{
-  // Initialize the MPI environment
+int main() {
+  // Initialize the MPI multithreaded environment
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
 
   LOG_WARN_IF(provided < MPI_THREAD_MULTIPLE) << "MPI does not provide the required threading support";
-
-  //MPI_Init(NULL, NULL);
 
   // Get the number of processes
   int world_size;
@@ -83,39 +63,6 @@ int main()
       mpiHandler(world_size, handlerStates, requestCounter, pendingRequests);
     }
   }
-}
-
-int getAvailableHandler(std::vector<HandlerState> handlerStates)
-{
-
-  int availableHandler = -1;
-
-  int i = 0;
-  while (i < handlerStates.size() && availableHandler == -1)
-  {
-    if (handlerStates[i].lambdasRunning < handlerStates[i].lambdas)
-    {
-      availableHandler = i;
-    }
-    i++;
-  }
-  
-  return availableHandler + 1;
-}
-
-bool convertToInt(const std::string& str, int *result) {
-  size_t pos = 0;
-    
-  // Try to convert the string
-  try {
-    *result = std::stoi(str, &pos);
-  } catch (const std::exception&) {
-    // Conversion failed, return false
-    return false;
-  }
-
-  // Check if the whole string was processed
-  return pos == str.size();
 }
 
 void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests) {
@@ -214,38 +161,4 @@ void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &req
     });
 
   app().run();
-}
-
-void mpiHandler(int worldSize, std::vector<HandlerState> handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests) {
-  LOG_INFO << "MPI Handler started";
-  while (true) {
-    MPI_Status status;
-    MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    LOG_INFO << "MPI Handler received from " << status.MPI_SOURCE << " with tag " << status.MPI_TAG;
-
-    int number_amount;
-    MPI_Get_count(&status, MPI_CHAR, &number_amount);
-
-    char response[number_amount];
-    
-    MPI_Recv(&response, number_amount, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, &status);
-
-    auto request = pendingRequests.extract(status.MPI_TAG);
-
-    if (request.empty()) {
-      LOG_INFO << "No pending request found for tag: " << status.MPI_TAG;
-      return;
-    }
-
-    auto value = request.mapped();
-
-    LOG_INFO << "Will enqueue callback for tag: " << status.MPI_TAG;
-
-    std::istringstream stream(response);
-
-    value.loop->queueInLoop([value, status, &stream, number_amount]() mutable {
-
-      value.callback(status, stream);
-    });    
-  }
 }
