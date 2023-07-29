@@ -14,17 +14,18 @@ find_package(fmt REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(rest_server rest_server.cpp)
-add_executable(lambda_handler lambda_handler.cpp)
+add_executable(main main.cpp)
+add_executable(lambdaHandler lambdaHandler.cpp)
 
-target_link_libraries(rest_server
+target_link_libraries(main
   PRIVATE
     Drogon::Drogon
     MPI::MPI_CXX
     OpenMP::OpenMP_CXX
 )
 
-target_link_libraries(lambda_handler
+target_link_libraries(lambdaHandler
   PRIVATE
     MPI::MPI_CXX
-    fmt::fmt)
+    fmt::fmt
+)

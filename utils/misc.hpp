@@ -1,5 +1,6 @@
-#include "globalStructures.hpp"
+#pragma once
 
+#include "globalStructures.hpp"
 
 int getAvailableHandler(std::vector<HandlerState> handlerStates) {
   int availableHandler = -1;
