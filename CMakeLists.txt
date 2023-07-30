@@ -13,6 +13,7 @@ find_package(Drogon REQUIRED)
 find_package(fmt REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
 
 add_executable(main main.cpp)
 add_executable(lambdaHandler lambdaHandler.cpp)
