@@ -44,19 +44,17 @@ int main() {
   int requestCounter = 0;
 
   std::map<int, PendingRequest> pendingRequests;
+  std::queue<UnhandledRequest> unhandledRequests;
 
-  omp_lock_t my_lock;
-  omp_init_lock(&my_lock);
-
-  #pragma omp parallel sections
+  #pragma omp parallel sections num_threads(2)
   {
     #pragma omp section
     {
-      restServer(worldSize, handlerStates, requestCounter, pendingRequests);
+      restServer(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
     #pragma omp section
     {
-      mpiHandler(worldSize, handlerStates, requestCounter, pendingRequests);
+      mpiHandler(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
   }
 }

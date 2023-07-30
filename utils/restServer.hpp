@@ -8,15 +8,13 @@
 
 using namespace drogon;
 
-void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests) {
+void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests, std::queue<UnhandledRequest> &unhandledRequests) {
   app().registerHandler(
     "/lambda/{lambda-id}",
-    [worldSize, &handlerStates, &requestCounter, &pendingRequests](const HttpRequestPtr &request,
+    [worldSize, &handlerStates, &requestCounter, &pendingRequests, &unhandledRequests](const HttpRequestPtr &request,
         std::function<void(const HttpResponsePtr &)> &&callback,
         const std::string &lambdaId)
     {
-      // GET REQUEST NUMBER. USE SOME VARIABLE TO ACCOUNT THE REQUEST NUMBER AND USE IT AS TAG
-      auto resp = HttpResponse::newHttpResponse();
       int lambdaIdInt;
       if (!convertToInt(lambdaId, &lambdaIdInt) && lambdaId.empty())
       {
@@ -38,58 +36,41 @@ void restServer(int worldSize, std::vector<HandlerState> handlerStates, int &req
 
         stateMutex.lock();
         auto availableHandler = getAvailableHandler(handlerStates);
-        handlerStates[availableHandler].lambdasRunning++;
+        if (availableHandler != 0) {
+          handlerStates[availableHandler - 1].lambdasRunning++;
+          LOG_INFO << "Lambdas running: " << handlerStates[availableHandler - 1].lambdasRunning;
+        }
         stateMutex.unlock();
 
-        if (availableHandler == 0) {
-          LOG_WARN << "No available handler";
-
-          // Should put request in queue
-          return;
-        }
-
-        auto responseHandler = [&handlerStates, availableHandler, callback](MPI_Status status, std::istringstream &response){
+        auto responseHandler = [&handlerStates, availableHandler, callback, &unhandledRequests](MPI_Status status, std::string response){
           LOG_INFO << "Received from mpi " << status.MPI_TAG;
 
-          Json::Value json;
-          json["status"] = "OK";
-
-          Json::Value jsonData;
-          Json::CharReaderBuilder jsonBuilder;
-          std::string errs;
-
-          if (!Json::parseFromStream(jsonBuilder, response, &jsonData, &errs)) {
-            std::cerr << "Failed to parse JSON: " << errs << std::endl;
-            json["status"] = "ERROR";
-          }
-
-          LOG_INFO << "has parsed";
-
-          json["response"] = jsonData;
-
-          auto resp = HttpResponse::newHttpJsonResponse(json);
+          auto resp = HttpResponse::newHttpResponse();
           resp->setStatusCode(k200OK);
+          resp->setBody(response);
+          resp->setContentTypeCode(CT_APPLICATION_JSON);
           callback(resp);
-
-
-          stateMutex.lock();
-          handlerStates[availableHandler].lambdasRunning--;
-          stateMutex.unlock();
+          LOG_INFO << "Response sent for request: " << status.MPI_TAG;
         };
 
-        pendingRequests[requestCounter] = { localRequestNumber, responseHandler, app().getIOLoop(app().getCurrentThreadIndex()) };
+        pendingRequests[localRequestNumber] = { localRequestNumber, responseHandler, app().getIOLoop(app().getCurrentThreadIndex()) };
 
-        LOG_INFO << "Chosen node: " << availableHandler;
-        LOG_INFO << "MPI Send to start lambda with id: " << lambdaId;
-        MPI_Send(lambdaId.c_str(), lambdaId.size(), MPI_CHAR, availableHandler, localRequestNumber, MPI_COMM_WORLD);
+        if (availableHandler == 0) {
+          LOG_WARN << "Request " << localRequestNumber << " will be enqued.";
+          {
+            std::lock_guard<std::mutex> lock(unhandledRequestsMutex);
+            unhandledRequests.push({ lambdaId, localRequestNumber });
+          }
+          return;
+        } else {
+          LOG_INFO << "Chosen node: " << availableHandler;
+          LOG_INFO << "MPI Send to start lambda with id: " << lambdaId;
+          MPI_Send(lambdaId.c_str(), lambdaId.size(), MPI_CHAR, availableHandler, localRequestNumber, MPI_COMM_WORLD);
+        }
       }
     },
     {Get});
 
-  // Ask Drogon to listen on 127.0.0.1 port 8848. Drogon supports listening
-  // on multiple IP addresses by adding multiple listeners. For example, if
-  // you want the server also listen on 127.0.0.1 port 5555. Just add another
-  // line of addListener("127.0.0.1", 5555)
   LOG_INFO << "Server running on http://127.0.0.1:8848";
   // Set the number of threads to 0 to use as many threads as available CPU cores
   //app().setThreadNum(0);

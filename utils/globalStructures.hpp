@@ -8,15 +8,20 @@ std::mutex stateMutex;
 
 std::mutex requestCounterMutex;
 
-struct HandlerState
-{
+std::mutex unhandledRequestsMutex;
+
+struct HandlerState {
   int lambdas;
   int lambdasRunning;
 };
 
-struct PendingRequest
-{
+struct PendingRequest {
   int tag;
-  std::function<void (MPI_Status, std::istringstream&)> callback;
+  std::function<void (MPI_Status, std::string)> callback;
   trantor::EventLoop *loop;
+};
+
+struct UnhandledRequest {
+  std::string lambdaId;
+  int requestNumber;
 };
