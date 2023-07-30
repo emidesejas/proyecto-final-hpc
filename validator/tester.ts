@@ -3,7 +3,7 @@ const LAMBAS = 1;
 const NUMBER_OF_CALLS = 10;
 
 const makeTestCalls = async () => {
-  const testCalls: { call: Promise<any>, lambda: number, start: number }[] = [];
+  const testCalls: { call: Promise<Response>, lambda: number, start: number }[] = [];
 
   // Create test calls using fetch
   for (let i = 0; i < NUMBER_OF_CALLS; i++) {
@@ -21,7 +21,9 @@ const makeTestCalls = async () => {
     const end = Date.now();
     const duration = end - testCall.start;
 
-    console.log({ duration });
+    const body = await response.json();
+
+    console.log({ duration, status: response.status, body });
     return {
       lambda: testCall.lambda,
       duration,
