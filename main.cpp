@@ -9,7 +9,8 @@
 
 using namespace drogon;
 
-int main() {
+int main()
+{
   // Initialize the MPI multithreaded environment
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
@@ -28,7 +29,7 @@ int main() {
 
   // Print off a hello world message
   printf("%s: Rest Server with rank %d out of %d processors\n",
-          processor_name, worldRank, worldSize);
+         processor_name, worldRank, worldSize);
 
   int availableLambdas[worldSize];
 
@@ -38,7 +39,7 @@ int main() {
 
   for (int i = 1; i < worldSize; i++)
   {
-    handlerStates[i - 1] = { availableLambdas[i], 0 };
+    handlerStates[i - 1] = {availableLambdas[i], 0};
   }
 
   int requestCounter = 0;
@@ -46,13 +47,13 @@ int main() {
   std::map<int, PendingRequest> pendingRequests;
   std::queue<UnhandledRequest> unhandledRequests;
 
-  #pragma omp parallel sections num_threads(2)
+#pragma omp parallel sections num_threads(2)
   {
-    #pragma omp section
+#pragma omp section
     {
       restServer(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
-    #pragma omp section
+#pragma omp section
     {
       mpiHandler(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
