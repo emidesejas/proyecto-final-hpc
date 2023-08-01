@@ -23,6 +23,7 @@ target_link_libraries(main
     Drogon::Drogon
     MPI::MPI_CXX
     OpenMP::OpenMP_CXX
+    fmt::fmt
 )
 
 target_link_libraries(lambdaHandler
