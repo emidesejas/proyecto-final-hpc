@@ -1,13 +1,14 @@
 #include "globalStructures.hpp"
+#include "logger.hpp"
 
 void mpiHandler(int worldSize, std::vector<HandlerState> &handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests, std::queue<UnhandledRequest> &unhandledRequests)
 {
-  LOG_INFO << "MPI Handler started";
+  info("MPI Handler started.");
   while (true)
   {
     MPI_Status status;
     MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    LOG_INFO << "MPI Handler received from " << status.MPI_SOURCE << " with tag " << status.MPI_TAG;
+    info("Received MPI message from {} with tag {}", status.MPI_SOURCE, status.MPI_TAG);
 
     {
       std::unique_lock<std::mutex> lock(stateMutex);
@@ -16,12 +17,11 @@ void mpiHandler(int worldSize, std::vector<HandlerState> &handlerStates, int &re
       {
         auto unhandledRequest = unhandledRequests.front();
         unhandledRequests.pop();
-        LOG_INFO << "Request " << unhandledRequest.requestNumber << " has been dequed and will be executed on handler " << status.MPI_SOURCE << ". lambda id: " << unhandledRequest.lambdaId;
+        info("Request {} has been dequed and will be executed on handler {}.", unhandledRequest.requestNumber, status.MPI_SOURCE);
         MPI_Send(unhandledRequest.lambdaId.c_str(), unhandledRequest.lambdaId.size(), MPI_CHAR, status.MPI_SOURCE, unhandledRequest.requestNumber, MPI_COMM_WORLD);
       }
       else
       {
-        LOG_INFO << "No unhandled requests found, will reduce handler " << status.MPI_SOURCE << " lambdasRunning " << handlerStates[status.MPI_SOURCE - 1].lambdasRunning;
         handlerStates[status.MPI_SOURCE - 1].lambdasRunning--;
       }
     }
@@ -36,7 +36,7 @@ void mpiHandler(int worldSize, std::vector<HandlerState> &handlerStates, int &re
 
     if (request.empty())
     {
-      LOG_WARN << "No pending request found for tag: " << status.MPI_TAG;
+      warn("No pending request found for tag: {}", status.MPI_TAG);
       return;
     }
 

@@ -2,6 +2,7 @@
 
 #include "globalStructures.hpp"
 
+// TODO: see if we can implement many ways to assign a handler (random, least busy, etc.)
 int getAvailableHandler(std::vector<HandlerState> handlerStates)
 {
   int availableHandler = -1;

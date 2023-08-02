@@ -6,37 +6,53 @@
 #include "utils/misc.hpp"
 #include "utils/mpiUtils.hpp"
 #include "utils/restServer.hpp"
+#include "utils/logger.hpp"
 
 using namespace drogon;
 
 int main()
 {
+  char processorName[MPI_MAX_PROCESSOR_NAME];
+  int processorNameLength;
+
   // Initialize the MPI multithreaded environment
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
 
-  LOG_WARN_IF(provided < MPI_THREAD_MULTIPLE) << "MPI does not provide the required threading support";
+  MPI_Get_processor_name(processorName, &processorNameLength);
+  auto deviceName = "Server " + std::string(processorName);
+  console::internal::setDeviceString(deviceName);
+
+  if (provided < MPI_THREAD_MULTIPLE)
+  {
+    warn("MPI thread level below required");
+  }
+  else
+  {
+    info("MPI thread level is sufficient");
+  }
 
   int worldSize;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
 
+  info("Nodes on the network: {}", worldSize);
+
   int worldRank;
   MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
 
-  char processor_name[MPI_MAX_PROCESSOR_NAME];
-  int name_len;
-  MPI_Get_processor_name(processor_name, &name_len);
+  if (worldRank != 0)
+  {
+    error("Server must be started on rank 0");
+    MPI_Finalize();
+    return 1;
+  }
 
-  // Print off a hello world message
-  printf("%s: Rest Server with rank %d out of %d processors\n",
-         processor_name, worldRank, worldSize);
+  info("Starting Server with rank: {}", worldRank);
 
   int availableLambdas[worldSize];
-
   MPI_Gather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, availableLambdas, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
   std::vector<HandlerState> handlerStates(worldSize - 1);
-
   for (int i = 1; i < worldSize; i++)
   {
     handlerStates[i - 1] = {availableLambdas[i], 0};
@@ -51,10 +67,12 @@ int main()
   {
 #pragma omp section
     {
+      console::internal::setDeviceString(deviceName);
       restServer(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
 #pragma omp section
     {
+      console::internal::setDeviceString(deviceName);
       mpiHandler(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
   }
