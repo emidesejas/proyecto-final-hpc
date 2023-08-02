@@ -1,3 +1,5 @@
+#pragma once
+
 #include <string>
 #include <chrono>
 #include <iomanip>
@@ -46,7 +48,7 @@ namespace console
 
       auto messageFormatted = fmt::format(message, args...);
 
-      fmt::println("[{}] [{}] [{}] {}:{}: {}", timestamp, currentDevice, level, extract_filename(file), line, messageFormatted);
+      fmt::println("[{}] [{}] [{}] {} - {}:{}", timestamp, currentDevice, level, messageFormatted, extract_filename(file), line);
     }
   }
 

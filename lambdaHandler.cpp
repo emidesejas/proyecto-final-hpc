@@ -20,6 +20,8 @@
 #include <cxxopts.hpp>
 #include <unistd.h>
 
+#include "utils/logger.hpp"
+
 #define READ_END 0
 #define WRITE_END 1
 
@@ -38,12 +40,12 @@ int handleLambda(int rank, std::string lambdaId, int requestNumber);
 
 void masterThread()
 {
-  fmt::println("Master thread started");
+  info("Master thread started");
   while (true)
   {
     MPI_Status status;
     MPI_Probe(0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    fmt::println("Will execute request: {}", status.MPI_TAG);
+    info("Will execute request: {}", status.MPI_TAG);
 
     int requestLength;
     MPI_Get_count(&status, MPI_CHAR, &requestLength);
@@ -69,11 +71,12 @@ void masterThread()
   doneProbing.store(true);
 }
 
-void lambdaWorker(int rank)
+void lambdaWorker(int rank, int threadId, std::string deviceName)
 {
+  console::internal::setDeviceString(deviceName);
   while (!doneProbing.load() || !taskQueue.empty())
   {
-    fmt::println("Worker thread waiting for task");
+    info("Worker thread {} waiting for task.", threadId);
     LambdaData currentStatus;
     {
       std::unique_lock<std::mutex> lock(queueMutex);
@@ -90,39 +93,34 @@ void lambdaWorker(int rank)
 int main(int argc, char **argv)
 {
   cxxopts::Options options("Lambda Handler", "Executes lambda functions");
-
   options.add_options()("l,lambdas", "How many lambdas can this node handle", cxxopts::value<int>()->default_value("1"));
-
   auto params = options.parse(argc, argv);
-
   auto lambdas = params["lambdas"].as<int>();
 
   // Initialize the MPI multithreaded environment
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
 
-  // Get the number of processes
-  int world_size;
-  MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+  int worldSize;
+  MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
 
-  // Get the rank of the process
-  int world_rank;
-  MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+  int worldRank;
+  MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
 
-  // Get the name of the processor
-  char processor_name[MPI_MAX_PROCESSOR_NAME];
-  int name_len;
-  MPI_Get_processor_name(processor_name, &name_len);
+  char processorName[MPI_MAX_PROCESSOR_NAME];
+  int processorNameLength;
+  MPI_Get_processor_name(processorName, &processorNameLength);
+  auto deviceName = "Worker " + std::string(processorName);
+  console::internal::setDeviceString(deviceName);
 
   MPI_Gather(&lambdas, 1, MPI_INT, NULL, 0, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD);
-
-  fmt::println("{}: Lambda handler with rank {} out of {} processors. Handling {} lambdas.", processor_name, world_rank, world_size, lambdas);
+  info("Handler with rank {}. Handling {} lambdas.", worldRank, worldSize, lambdas);
 
   std::vector<std::thread> workerThreads;
 
   for (int i = 0; i < lambdas; ++i)
   {
-    workerThreads.emplace_back(lambdaWorker, world_rank);
+    workerThreads.emplace_back(lambdaWorker, worldRank, i, deviceName);
   }
 
   masterThread();
@@ -151,34 +149,34 @@ int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
     mkfifo(fromNodeFifo.c_str(), 0666);
 
     // Open the toNodeFifo for writing
-    int fd_out = open(toNodeFifo.c_str(), O_WRONLY);
-    if (fd_out == -1)
+    int fdOut = open(toNodeFifo.c_str(), O_WRONLY);
+    if (fdOut == -1)
     {
-      std::cerr << "Failed to open toNodeFifo for writing" << std::endl;
+      error("Failed to open toNodeFifo for writing");
       return 1;
     }
 
     // Write to node
-    write(fd_out, lambdaId.c_str(), lambdaId.size());
+    write(fdOut, lambdaId.c_str(), lambdaId.size());
 
     // Close the write end of the pipe
-    close(fd_out);
+    close(fdOut);
 
     // Open the fromNodeFifo for reading
-    int fd_in = open(fromNodeFifo.c_str(), O_RDONLY);
-    if (fd_in == -1)
+    int fdIn = open(fromNodeFifo.c_str(), O_RDONLY);
+    if (fdIn == -1)
     {
-      std::cerr << "Failed to open fromNodeFifo for reading" << std::endl;
+      error("Failed to open fromNodeFifo for reading");
       return 1;
     }
 
     int64_t dataSize;
-    int bytesRead = read(fd_in, &dataSize, sizeof(dataSize)); // Read the binary representation of the size
+    int bytesRead = read(fdIn, &dataSize, sizeof(dataSize)); // Read the binary representation of the size
 
     if (bytesRead <= 0)
     {
-      std::cerr << "Failed to read size of fromNode pipe" << std::endl;
-      close(fd_in);
+      error("Failed to read size of fromNode pipe");
+      close(fdIn);
       return 1;
     }
 
@@ -190,11 +188,11 @@ int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
     while (dataSize > 0)
     {
       int bytesToRead = std::min(bufferSize, dataSize);
-      int bytesRead = read(fd_in, buffer, bytesToRead);
+      int bytesRead = read(fdIn, buffer, bytesToRead);
       if (bytesRead <= 0)
       {
-        std::cerr << "Failed to read data from named pipe" << std::endl;
-        close(fd_in);
+        error("Failed to read data from named pipe");
+        close(fdIn);
         return 1;
       }
       data.append(buffer, bytesRead);
@@ -202,7 +200,7 @@ int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
     }
 
     // Close the read end of the pipe
-    close(fd_in);
+    close(fdIn);
 
     wait(NULL);
 
@@ -216,8 +214,6 @@ int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
       perror("Error removing the fromNodeFifo");
     }
 
-    fmt::println("REQUEST: {}, received from {} and will send to master: {}", requestNumber, fromNodeFifo, data);
-
     MPI_Send(data.c_str(), data.size(), MPI_CHAR, 0, requestNumber, MPI_COMM_WORLD);
     return 0;
   }
@@ -227,7 +223,7 @@ int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
     execlp("node", "node", "child.js", toNodeFifo.c_str(), fromNodeFifo.c_str(), NULL);
 
     // If exec returns, it must have failed
-    std::cerr << "Exec failed" << std::endl;
+    error("Exec failed");
     return 1;
   }
 }

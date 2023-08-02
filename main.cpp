@@ -12,15 +12,16 @@ using namespace drogon;
 
 int main()
 {
-  char deviceName[MPI_MAX_PROCESSOR_NAME];
-  int deviceLength;
+  char processorName[MPI_MAX_PROCESSOR_NAME];
+  int processorNameLength;
 
   // Initialize the MPI multithreaded environment
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
 
-  MPI_Get_processor_name(deviceName, &deviceLength);
-  console::internal::setDeviceString("Server " + std::string(deviceName));
+  MPI_Get_processor_name(processorName, &processorNameLength);
+  auto deviceName = "Server " + std::string(processorName);
+  console::internal::setDeviceString(deviceName);
 
   if (provided < MPI_THREAD_MULTIPLE)
   {
@@ -66,10 +67,12 @@ int main()
   {
 #pragma omp section
     {
+      console::internal::setDeviceString(deviceName);
       restServer(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
 #pragma omp section
     {
+      console::internal::setDeviceString(deviceName);
       mpiHandler(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
     }
   }
