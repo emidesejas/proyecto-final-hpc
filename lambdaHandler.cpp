@@ -114,7 +114,7 @@ int main(int argc, char **argv)
   console::internal::setDeviceString(deviceName);
 
   MPI_Gather(&lambdas, 1, MPI_INT, NULL, 0, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD);
-  info("Handler with rank {}. Handling {} lambdas.", worldRank, worldSize, lambdas);
+  info("Handler with rank {}. Handling {} lambdas.", worldRank, lambdas);
 
   std::vector<std::thread> workerThreads;
 
