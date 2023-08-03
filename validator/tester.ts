@@ -1,6 +1,6 @@
 const API_ENDPOINT = 'http://localhost:8848/lambda/';
 const LAMBAS = 1;
-const NUMBER_OF_CALLS = 10;
+const NUMBER_OF_CALLS = 100;
 
 const makeTestCalls = async () => {
   const testCalls: { call: Promise<Response>, lambda: number, start: number }[] = [];
