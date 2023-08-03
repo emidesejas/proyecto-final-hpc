@@ -20,7 +20,7 @@ int main()
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
 
   MPI_Get_processor_name(processorName, &processorNameLength);
-  auto deviceName = "Server " + std::string(processorName);
+  auto deviceName = "Load Balancer " + std::string(processorName);
   console::internal::setDeviceString(deviceName);
 
   if (provided < MPI_THREAD_MULTIPLE)
@@ -42,12 +42,12 @@ int main()
 
   if (worldRank != 0)
   {
-    error("Server must be started on rank 0");
+    error("Load Balancer must be started on rank 0");
     MPI_Finalize();
     return 1;
   }
 
-  info("Starting Server with rank: {}", worldRank);
+  info("Starting Load Balancer with rank: {}", worldRank);
 
   int availableLambdas[worldSize];
   MPI_Gather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, availableLambdas, 1, MPI_INT, 0, MPI_COMM_WORLD);
