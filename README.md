@@ -10,5 +10,5 @@ cmake --build build
 
 ## Run the project
 ```shell
-mpirun -n 1 ./build/main : -n 1 ./build/lambdaHandler
+mpirun -n 1 ./build/loadBalancer : -n 1 ./build/lambdaHandler -l 2
 ```

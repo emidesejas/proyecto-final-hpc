@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <atomic>
 #include <mpi.h>
+#include <signal.h>
 
 #include <mpi.h>
 #include <fmt/format.h>
@@ -31,12 +32,25 @@ struct LambdaData
   int requestNumber;
 };
 
+struct RequestTimeEvents
+{
+  int requestNumber;
+  std::chrono::_V2::system_clock::time_point time;
+  std::string event;
+};
+
 std::queue<LambdaData> taskQueue;
 std::mutex queueMutex;
 std::condition_variable queueCond;
 std::atomic<bool> doneProbing(false);
 
 int handleLambda(int rank, std::string lambdaId, int requestNumber);
+
+void handle_sigint(int sig_num)
+{
+  info("SigINT received. Exiting gracefully!");
+  exit(EXIT_SUCCESS);
+}
 
 void masterThread()
 {
@@ -45,7 +59,7 @@ void masterThread()
   {
     MPI_Status status;
     MPI_Probe(0, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    info("Will execute request: {}", status.MPI_TAG);
+    info("Will execute Request number: {}", status.MPI_TAG);
 
     int requestLength;
     MPI_Get_count(&status, MPI_CHAR, &requestLength);
@@ -56,8 +70,8 @@ void masterThread()
     // Convert the char array to std::string
     std::string requestString(request, requestLength);
 
-    // TODO: add logic to terminate the process from the main process
-    if (requestString == "0")
+    // TAG 0 is restricted for system messages
+    if (status.MPI_TAG == 0)
     {
       break;
     }
@@ -73,6 +87,11 @@ void masterThread()
 
 void lambdaWorker(int rank, int threadId, std::string deviceName)
 {
+  // SigInt only received in main thread
+  sigset_t set;
+  sigfillset(&set);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
+
   console::internal::setDeviceString(deviceName);
   while (!doneProbing.load() || !taskQueue.empty())
   {
@@ -81,12 +100,18 @@ void lambdaWorker(int rank, int threadId, std::string deviceName)
     {
       std::unique_lock<std::mutex> lock(queueMutex);
       queueCond.wait(lock, []
-                     { return !taskQueue.empty(); });
+                     { return doneProbing.load() || !taskQueue.empty(); });
 
-      currentStatus = taskQueue.front();
-      taskQueue.pop();
+      if (!doneProbing.load())
+      {
+        currentStatus = taskQueue.front();
+        taskQueue.pop();
+      }
     }
-    handleLambda(rank, currentStatus.lambdaId, currentStatus.requestNumber);
+    if (!doneProbing.load())
+    {
+      handleLambda(rank, currentStatus.lambdaId, currentStatus.requestNumber);
+    }
   }
 }
 
@@ -96,6 +121,8 @@ int main(int argc, char **argv)
   options.add_options()("l,lambdas", "How many lambdas can this node handle", cxxopts::value<int>()->default_value("1"));
   auto params = options.parse(argc, argv);
   auto lambdas = params["lambdas"].as<int>();
+
+  signal(SIGINT, handle_sigint);
 
   // Initialize the MPI multithreaded environment
   int provided;
@@ -135,12 +162,14 @@ int main(int argc, char **argv)
 
 int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
 {
-  // Fork a child process
-  pid_t pid = fork();
-
   auto fifoSuffix = fmt::format("{}_{}", handlerRank, requestNumber);
   auto toNodeFifo = fmt::format("toNode_{}", fifoSuffix);
   auto fromNodeFifo = fmt::format("fromNode_{}", fifoSuffix);
+
+  info("Will fork for request number: {}", requestNumber);
+
+  // Fork a child process
+  pid_t pid = fork();
 
   if (pid > 0)
   { // parent process
@@ -214,7 +243,9 @@ int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
       perror("Error removing the fromNodeFifo");
     }
 
+    info("worker will finish request number: {}", requestNumber);
     MPI_Send(data.c_str(), data.size(), MPI_CHAR, 0, requestNumber, MPI_COMM_WORLD);
+    info("worker sent request number: {}", requestNumber);
     return 0;
   }
   else

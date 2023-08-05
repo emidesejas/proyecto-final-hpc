@@ -63,17 +63,22 @@ int main()
   std::map<int, PendingRequest> pendingRequests;
   std::queue<UnhandledRequest> unhandledRequests;
 
+  std::map<int, RequestDuration> durations;
+  std::vector<RequestTimeEvent> timeEvents;
+
 #pragma omp parallel sections num_threads(2)
   {
 #pragma omp section
     {
       console::internal::setDeviceString(deviceName);
-      restServer(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
+      restServer(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests, durations, timeEvents);
     }
 #pragma omp section
     {
       console::internal::setDeviceString(deviceName);
-      mpiHandler(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests);
+      mpiHandler(worldSize, handlerStates, requestCounter, pendingRequests, unhandledRequests, timeEvents);
     }
   }
+
+  exit(EXIT_SUCCESS);
 }
