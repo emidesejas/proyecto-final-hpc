@@ -1,14 +1,25 @@
 #include "globalStructures.hpp"
 #include "logger.hpp"
 
-void mpiHandler(int worldSize, std::vector<HandlerState> &handlerStates, int &requestCounter, std::map<int, PendingRequest> &pendingRequests, std::queue<UnhandledRequest> &unhandledRequests)
+void mpiHandler(
+    int worldSize,
+    std::vector<HandlerState> &handlerStates,
+    int &requestCounter,
+    std::map<int, PendingRequest> &pendingRequests,
+    std::queue<UnhandledRequest> &unhandledRequests,
+    std::vector<RequestTimeEvent> &timeEvents)
 {
   info("MPI Handler started.");
   while (true)
   {
     MPI_Status status;
     MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-    info("Received MPI message from {} with tag {}", status.MPI_SOURCE, status.MPI_TAG);
+    info("Received MPI message from {} with request number: {}", status.MPI_SOURCE, status.MPI_TAG);
+    auto mpiProbe = std::chrono::high_resolution_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(timeEventsMutex);
+      timeEvents.push_back({status.MPI_TAG, mpiProbe, "SERVER_MPI_PROBE"});
+    }
 
     {
       std::unique_lock<std::mutex> lock(stateMutex);
@@ -19,6 +30,11 @@ void mpiHandler(int worldSize, std::vector<HandlerState> &handlerStates, int &re
         unhandledRequests.pop();
         info("Request {} has been dequed and will be executed on handler {}.", unhandledRequest.requestNumber, status.MPI_SOURCE);
         MPI_Send(unhandledRequest.lambdaId.c_str(), unhandledRequest.lambdaId.size(), MPI_CHAR, status.MPI_SOURCE, unhandledRequest.requestNumber, MPI_COMM_WORLD);
+        auto mpiSend = std::chrono::high_resolution_clock::now();
+        {
+          std::lock_guard<std::mutex> lock(timeEventsMutex);
+          timeEvents.push_back({unhandledRequest.requestNumber, mpiSend, "SERVER_MPI_SEND"});
+        }
       }
       else
       {
@@ -26,25 +42,30 @@ void mpiHandler(int worldSize, std::vector<HandlerState> &handlerStates, int &re
       }
     }
 
-    int number_amount;
-    MPI_Get_count(&status, MPI_CHAR, &number_amount);
+    int responseLength;
+    MPI_Get_count(&status, MPI_CHAR, &responseLength);
 
-    char response[number_amount];
-    MPI_Recv(&response, number_amount, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, &status);
+    auto pendingRequest = pendingRequests.extract(status.MPI_TAG);
 
-    auto request = pendingRequests.extract(status.MPI_TAG);
-
-    if (request.empty())
+    if (pendingRequest.empty())
     {
-      warn("No pending request found for tag: {}", status.MPI_TAG);
+      warn("No pending request found for request number: {}", status.MPI_TAG);
       return;
     }
 
-    auto value = request.mapped();
+    auto value = pendingRequest.mapped();
 
-    std::string stringResponse(response, number_amount);
+    char *responseBuffer = new char[responseLength];
 
-    value.loop->queueInLoop([value, status, stringResponse, number_amount]() mutable
-                            { value.callback(status, stringResponse); });
+    MPI_Request *mpiRequest = new MPI_Request();
+    MPI_Irecv(responseBuffer, responseLength, MPI_CHAR, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, mpiRequest);
+    auto mpiIrecv = std::chrono::high_resolution_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(timeEventsMutex);
+      timeEvents.push_back({status.MPI_TAG, mpiIrecv, "SERVER_MPI_IRECV"});
+    }
+
+    value.loop->queueInLoop([value, mpiRequest, responseBuffer, responseLength]()
+                            { value.callback(mpiRequest, responseBuffer, responseLength); });
   }
 }
