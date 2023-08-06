@@ -23,7 +23,7 @@ const makeTestCalls = async () => {
 
     const body = await response.json();
 
-    console.log({ duration, status: response.status, body });
+    console.log({ duration, status: response.status, body, number: response.headers.get('requestnumber') });
     return {
       lambda: testCall.lambda,
       duration,

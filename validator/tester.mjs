@@ -1,4 +1,4 @@
-const API_ENDPOINT = 'http://localhost:8848/lambda/';
+const API_ENDPOINT = 'http://127.0.0.1:8848/lambda/';
 const LAMBAS = 1;
 const NUMBER_OF_CALLS = 100;
 
@@ -23,7 +23,7 @@ const makeTestCalls = async () => {
 
     const body = await response.json();
 
-    console.log({ duration, status: response.status, body });
+    console.log({ duration, status: response.status, body, number: response.headers.get('requestnumber') });
     return {
       lambda: testCall.lambda,
       duration,

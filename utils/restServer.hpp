@@ -91,6 +91,7 @@ void restServer(
             resp->setStatusCode(k200OK);
             resp->setBody(response);
             resp->setContentTypeCode(CT_APPLICATION_JSON);
+            resp->addHeader("RequestNumber", std::to_string(localRequestNumber));
             callback(resp);
             info("Response sent for request: {}", status.MPI_TAG);
             auto start = durations[localRequestNumber].startTime;
