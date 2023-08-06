@@ -143,8 +143,6 @@ void lambdaWorker(int rank, int threadId, std::string deviceName)
     }
     workerLoop(threadId, fdOut, fromNodeFifo);
 
-    write(fdOut, "exit", 4);
-
     close(fdOut);
 
     wait(NULL);
@@ -221,8 +219,10 @@ int handleLambda(int fdOut, std::string fromNodeFifo, std::string lambdaId, int 
 {
   info("Will send request number: {} to NodeJS", requestNumber);
 
+  auto nodejsData = fmt::format("{},{}", lambdaId, requestNumber);
+
   // Write to node
-  write(fdOut, lambdaId.c_str(), lambdaId.size());
+  write(fdOut, nodejsData.c_str(), nodejsData.size());
 
   // Open the fromNodeFifo for reading
   int fdIn = open(fromNodeFifo.c_str(), O_RDONLY);
@@ -236,11 +236,19 @@ int handleLambda(int fdOut, std::string fromNodeFifo, std::string lambdaId, int 
   int64_t dataSize;
   int bytesRead = read(fdIn, &dataSize, sizeof(dataSize));
 
+  int retries = 0;
+  while (bytesRead <= 0 && retries < 10)
+  {
+    info("Failed to read size for request number: {}. Retrying...", requestNumber);
+    sleep(1);
+    bytesRead = read(fdIn, &dataSize, sizeof(dataSize));
+    retries++;
+  }
+
   if (bytesRead <= 0)
   {
-    error("Failed to read size of fromNode pipe");
+    error("Failed to read size for request number: {}", requestNumber);
     close(fdIn);
-    return 1;
   }
 
   std::string data;
@@ -254,9 +262,8 @@ int handleLambda(int fdOut, std::string fromNodeFifo, std::string lambdaId, int 
     int bytesRead = read(fdIn, buffer, bytesToRead);
     if (bytesRead <= 0)
     {
-      error("Failed to read data from named pipe");
+      error("Failed to read data for request number: {}", requestNumber);
       close(fdIn);
-      return 1;
     }
     data.append(buffer, bytesRead);
     dataSize -= bytesRead;
