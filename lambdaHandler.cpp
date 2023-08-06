@@ -44,12 +44,12 @@ std::mutex queueMutex;
 std::condition_variable queueCond;
 std::atomic<bool> doneProbing(false);
 
-int handleLambda(int rank, std::string lambdaId, int requestNumber);
+int handleLambda(int fdOut, std::string fromNodeFifo, std::string lambdaId, int requestNumber);
 
-void handle_sigint(int sig_num)
+void handle_sigint(int sigNum)
 {
-  info("SigINT received. Exiting gracefully!");
-  exit(EXIT_SUCCESS);
+  info("SigINT received. Ignoring in favor of MPI exit message.");
+  // exit(EXIT_SUCCESS);
 }
 
 void masterThread()
@@ -73,26 +73,24 @@ void masterThread()
     // TAG 0 is restricted for system messages
     if (status.MPI_TAG == 0)
     {
+      info("Received system message: {}", requestString);
       break;
     }
-
+    else
     {
-      std::lock_guard<std::mutex> lock(queueMutex);
-      taskQueue.push({requestString, status.MPI_TAG});
+      {
+        std::lock_guard<std::mutex> lock(queueMutex);
+        taskQueue.push({requestString, status.MPI_TAG});
+      }
+      queueCond.notify_one();
     }
-    queueCond.notify_one();
   }
   doneProbing.store(true);
+  queueCond.notify_all();
 }
 
-void lambdaWorker(int rank, int threadId, std::string deviceName)
+void workerLoop(int threadId, int fdOut, std::string fromNodeFifo)
 {
-  // SigInt only received in main thread
-  sigset_t set;
-  sigfillset(&set);
-  pthread_sigmask(SIG_BLOCK, &set, NULL);
-
-  console::internal::setDeviceString(deviceName);
   while (!doneProbing.load() || !taskQueue.empty())
   {
     info("Worker thread {} waiting for task.", threadId);
@@ -110,8 +108,67 @@ void lambdaWorker(int rank, int threadId, std::string deviceName)
     }
     if (!doneProbing.load())
     {
-      handleLambda(rank, currentStatus.lambdaId, currentStatus.requestNumber);
+      handleLambda(fdOut, fromNodeFifo, currentStatus.lambdaId, currentStatus.requestNumber);
     }
+  }
+}
+
+void lambdaWorker(int rank, int threadId, std::string deviceName)
+{
+  console::internal::setDeviceString(deviceName);
+
+  // SigInt only received in main thread
+  sigset_t set;
+  sigfillset(&set);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
+
+  auto toNodeFifo = fmt::format("toNode_{}_{}", rank, threadId);
+  auto fromNodeFifo = fmt::format("fromNode_{}_{}", rank, threadId);
+
+  // Create the IPC named pipes
+  mkfifo(toNodeFifo.c_str(), 0666);
+  mkfifo(fromNodeFifo.c_str(), 0666);
+
+  pid_t pid = fork();
+  // The parent process executes the worker loop which blocks until a request is received
+  // The child process forks to NodeJS with the child.js script and the Pipes as parameters
+  if (pid > 0)
+  {
+    // Open the toNodeFifo for writing
+    int fdOut = open(toNodeFifo.c_str(), O_WRONLY);
+    if (fdOut == -1)
+    {
+      error("Failed to open toNodeFifo for writing");
+      // return 1;
+    }
+    workerLoop(threadId, fdOut, fromNodeFifo);
+
+    write(fdOut, "exit", 4);
+
+    close(fdOut);
+
+    wait(NULL);
+
+    if (unlink(toNodeFifo.c_str()) == -1)
+    {
+      perror("Error removing the toNodeFifo");
+    }
+
+    if (unlink(fromNodeFifo.c_str()) == -1)
+    {
+      perror("Error removing the fromNodeFifo");
+    }
+
+    info("Worker thread {} finished", threadId);
+  }
+  else
+  {
+    // Exec the child.js script
+    execlp("node", "node", "child.js", toNodeFifo.c_str(), fromNodeFifo.c_str(), NULL);
+
+    // If exec returns, it must have failed
+    error("Exec failed");
+    // return 1
   }
 }
 
@@ -160,101 +217,55 @@ int main(int argc, char **argv)
   MPI_Finalize();
 }
 
-int handleLambda(int handlerRank, std::string lambdaId, int requestNumber)
+int handleLambda(int fdOut, std::string fromNodeFifo, std::string lambdaId, int requestNumber)
 {
-  auto fifoSuffix = fmt::format("{}_{}", handlerRank, requestNumber);
-  auto toNodeFifo = fmt::format("toNode_{}", fifoSuffix);
-  auto fromNodeFifo = fmt::format("fromNode_{}", fifoSuffix);
+  info("Will send request number: {} to NodeJS", requestNumber);
 
-  info("Will fork for request number: {}", requestNumber);
+  // Write to node
+  write(fdOut, lambdaId.c_str(), lambdaId.size());
 
-  // Fork a child process
-  pid_t pid = fork();
+  // Open the fromNodeFifo for reading
+  int fdIn = open(fromNodeFifo.c_str(), O_RDONLY);
+  if (fdIn == -1)
+  {
+    error("Failed to open fromNodeFifo for reading");
+    return 1;
+  }
 
-  if (pid > 0)
-  { // parent process
-    // Create the named pipes
-    mkfifo(toNodeFifo.c_str(), 0666);
-    mkfifo(fromNodeFifo.c_str(), 0666);
+  // Read the binary representation of the size
+  int64_t dataSize;
+  int bytesRead = read(fdIn, &dataSize, sizeof(dataSize));
 
-    // Open the toNodeFifo for writing
-    int fdOut = open(toNodeFifo.c_str(), O_WRONLY);
-    if (fdOut == -1)
-    {
-      error("Failed to open toNodeFifo for writing");
-      return 1;
-    }
+  if (bytesRead <= 0)
+  {
+    error("Failed to read size of fromNode pipe");
+    close(fdIn);
+    return 1;
+  }
 
-    // Write to node
-    write(fdOut, lambdaId.c_str(), lambdaId.size());
+  std::string data;
+  data.reserve(dataSize);
 
-    // Close the write end of the pipe
-    close(fdOut);
-
-    // Open the fromNodeFifo for reading
-    int fdIn = open(fromNodeFifo.c_str(), O_RDONLY);
-    if (fdIn == -1)
-    {
-      error("Failed to open fromNodeFifo for reading");
-      return 1;
-    }
-
-    int64_t dataSize;
-    int bytesRead = read(fdIn, &dataSize, sizeof(dataSize)); // Read the binary representation of the size
-
+  const int64_t bufferSize = 128;
+  char buffer[bufferSize];
+  while (dataSize > 0)
+  {
+    int bytesToRead = std::min(bufferSize, dataSize);
+    int bytesRead = read(fdIn, buffer, bytesToRead);
     if (bytesRead <= 0)
     {
-      error("Failed to read size of fromNode pipe");
+      error("Failed to read data from named pipe");
       close(fdIn);
       return 1;
     }
-
-    std::string data;
-    data.reserve(dataSize);
-
-    const int64_t bufferSize = 128;
-    char buffer[bufferSize];
-    while (dataSize > 0)
-    {
-      int bytesToRead = std::min(bufferSize, dataSize);
-      int bytesRead = read(fdIn, buffer, bytesToRead);
-      if (bytesRead <= 0)
-      {
-        error("Failed to read data from named pipe");
-        close(fdIn);
-        return 1;
-      }
-      data.append(buffer, bytesRead);
-      dataSize -= bytesRead;
-    }
-
-    // Close the read end of the pipe
-    close(fdIn);
-
-    wait(NULL);
-
-    if (unlink(toNodeFifo.c_str()) == -1)
-    {
-      perror("Error removing the toNodeFifo");
-    }
-
-    if (unlink(fromNodeFifo.c_str()) == -1)
-    {
-      perror("Error removing the fromNodeFifo");
-    }
-
-    info("worker will finish request number: {}", requestNumber);
-    MPI_Send(data.c_str(), data.size(), MPI_CHAR, 0, requestNumber, MPI_COMM_WORLD);
-    info("worker sent request number: {}", requestNumber);
-    return 0;
+    data.append(buffer, bytesRead);
+    dataSize -= bytesRead;
   }
-  else
-  { // child process
-    // Exec the child.js script
-    execlp("node", "node", "child.js", toNodeFifo.c_str(), fromNodeFifo.c_str(), NULL);
 
-    // If exec returns, it must have failed
-    error("Exec failed");
-    return 1;
-  }
+  // Close the read end of the pipe
+  close(fdIn);
+
+  MPI_Send(data.c_str(), data.size(), MPI_CHAR, 0, requestNumber, MPI_COMM_WORLD);
+  info("worker sent request number: {}", requestNumber);
+  return 0;
 }

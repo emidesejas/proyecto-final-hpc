@@ -15,6 +15,13 @@ void mpiHandler(
     MPI_Status status;
     MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
     info("Received MPI message from {} with request number: {}", status.MPI_SOURCE, status.MPI_TAG);
+
+    if (status.MPI_TAG == 0)
+    {
+      info("Received exit message from {}", status.MPI_SOURCE);
+      break;
+    }
+
     auto mpiProbe = std::chrono::high_resolution_clock::now();
     {
       std::lock_guard<std::mutex> lock(timeEventsMutex);
@@ -68,4 +75,5 @@ void mpiHandler(
     value.loop->queueInLoop([value, mpiRequest, responseBuffer, responseLength]()
                             { value.callback(mpiRequest, responseBuffer, responseLength); });
   }
+  info("MPI Handler stopped.");
 }
