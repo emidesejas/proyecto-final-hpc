@@ -110,7 +110,11 @@ void restServer(
             delete mpiRequest;
           };
 
-          pendingRequests[localRequestNumber] = {localRequestNumber, responseHandler, app().getIOLoop(app().getCurrentThreadIndex())};
+          {
+            std::lock_guard<std::mutex> lock(pendingRequestsMutex);
+            pendingRequests[localRequestNumber] = {localRequestNumber, responseHandler, app().getIOLoop(app().getCurrentThreadIndex())};
+            info("Inserted pending requests for request number: {}", localRequestNumber);
+          }
 
           info("Request number: {} will be executed on thread {}", localRequestNumber, app().getCurrentThreadIndex());
 
@@ -146,6 +150,7 @@ void restServer(
   // Set the number of threads to 0 to use as many threads as available CPU cores
   app().setThreadNum(6);
   app().addListener("127.0.0.1", 8848);
+  app().setIdleConnectionTimeout(0);
   app().setIntSignalHandler(
       [&durations, &timeEvents, worldSize]()
       {

@@ -6,13 +6,15 @@
 #include <mpi.h>
 #include <omp.h>
 
-std::mutex stateMutex;
+inline std::mutex stateMutex;
 
-std::mutex requestCounterMutex;
+inline std::mutex requestCounterMutex;
 
-std::mutex unhandledRequestsMutex;
+inline std::mutex unhandledRequestsMutex;
 
-std::mutex timeEventsMutex;
+inline std::mutex timeEventsMutex;
+
+inline std::mutex pendingRequestsMutex;
 
 struct HandlerState
 {

@@ -35,7 +35,7 @@ void mpiHandler(
       {
         auto unhandledRequest = unhandledRequests.front();
         unhandledRequests.pop();
-        info("Request {} has been dequed and will be executed on handler {}.", unhandledRequest.requestNumber, status.MPI_SOURCE);
+        info("Request number: {} has been dequed and will be executed on handler {}.", unhandledRequest.requestNumber, status.MPI_SOURCE);
         MPI_Send(unhandledRequest.lambdaId.c_str(), unhandledRequest.lambdaId.size(), MPI_CHAR, status.MPI_SOURCE, unhandledRequest.requestNumber, MPI_COMM_WORLD);
         auto mpiSend = std::chrono::high_resolution_clock::now();
         {
@@ -52,12 +52,17 @@ void mpiHandler(
     int responseLength;
     MPI_Get_count(&status, MPI_CHAR, &responseLength);
 
-    auto pendingRequest = pendingRequests.extract(status.MPI_TAG);
+    std::map<int, PendingRequest>::node_type pendingRequest;
+
+    {
+      std::lock_guard<std::mutex> lock(pendingRequestsMutex);
+      pendingRequest = pendingRequests.extract(status.MPI_TAG);
+    }
 
     if (pendingRequest.empty())
     {
       warn("No pending request found for request number: {}", status.MPI_TAG);
-      return;
+      continue;
     }
 
     auto value = pendingRequest.mapped();
