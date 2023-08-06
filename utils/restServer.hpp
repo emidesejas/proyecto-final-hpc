@@ -179,10 +179,10 @@ void restServer(
 
         // TODO: send signal to stop all handlers
 
-        for (int i = 1; i < worldSize; i++)
+        for (int i = 0; i < worldSize; i++)
         {
-          char message[] = "EXIT";
-          MPI_Send(&message, 4, MPI_CHAR, i, 0, MPI_COMM_WORLD);
+          std::string message = "EXIT";
+          MPI_Send(message.c_str(), message.length(), MPI_CHAR, i, 0, MPI_COMM_WORLD);
         }
         MPI_Finalize();
         app().quit();
